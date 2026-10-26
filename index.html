@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Private Call</title>
+<style>
+:root{--bg:#f6f6f4;--fg:#1c1c1a;--card:#fff;--ac:#2f6f4f;--mut:#6b6b66}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--fg:#eeeeea;--card:#222220;--ac:#3f8f67;--mut:#9a9a94}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column}
+h1{font-size:1.25rem;margin:16px 16px 4px}
+p.s{margin:0 16px 10px;color:var(--mut);font-size:.9rem}
+.card{background:var(--card);margin:8px 16px;padding:14px;border-radius:14px;display:flex;flex-direction:column;gap:10px}
+input{font-size:1.1rem;padding:12px;border-radius:10px;border:1px solid var(--mut);background:var(--bg);color:var(--fg)}
+button{font-size:1rem;padding:13px;border:0;border-radius:10px;background:var(--ac);color:#fff;font-weight:600}
+button.o{background:transparent;color:var(--ac);border:2px solid var(--ac)}
+button.r{background:#c0392b}
+#st{margin:6px 16px;color:var(--mut);font-size:.9rem;min-height:1.3em}
+#vids{position:relative;flex:1;margin:8px 16px;border-radius:14px;overflow:hidden;background:#000;display:none;min-height:240px}
+#remote{width:100%;height:100%;object-fit:cover}
+#local{position:absolute;right:10px;bottom:10px;width:30%;max-width:130px;border-radius:10px;border:2px solid #fff;object-fit:cover}
+#ctl{display:none;gap:8px;margin:0 16px 12px}
+#ctl button{flex:1}
+</style>
+</head>
+<body>
+<h1>🔒 Private Call</h1>
+<p class="s">Sirf 2 phone ke liye. Video seedha phone se phone, end-to-end encrypted.</p>
+<div class="card" id="setup">
+  <input id="code" placeholder="Secret code (lamba rakho, jaise: aam-papad-4821)" autocapitalize="none" autocomplete="off" spellcheck="false">
+  <button id="host">1️⃣ Main pehle hu (wait karunga)</button>
+  <button id="guest" class="o">2️⃣ Dusre phone se call lagao</button>
+</div>
+<div id="st"></div>
+<div id="vids"><video id="remote" autoplay playsinline></video><video id="local" autoplay playsinline muted></video></div>
+<div id="ctl"><button id="mute">Mute</button><button id="cam">Camera off</button><button id="end" class="r">End</button></div>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const st=t=>$('st').textContent=t;
+let peer=null,stream=null,call=null;
+function getCode(){
+  const c=($('code').value||'').trim().toLowerCase().replace(/[^a-z0-9-]/g,'-');
+  if(c.length<6){st("Code kam se kam 6 akshar ka rakho.");return null}
+  return 'pvc-'+c;
+}
+async function getMedia(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    st("Is browser me camera support nahi. Chrome ya Safari me kholo (https link se).");return false}
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:true});
+  }catch(e){
+    st(e.name==='NotAllowedError'?"Camera/mic blocked hai. Browser settings me Allow karo.":"Camera error: "+e.message);return false}
+  $('local').srcObject=stream;
+  $('setup').style.display='none';$('vids').style.display='block';$('ctl').style.display='flex';
+  return true;
+}
+function attach(c){
+  call=c;
+  c.on('stream',s=>{$('remote').srcObject=s;st("🔒 Connected (end-to-end encrypted)")});
+  c.on('close',()=>finish("Call khatam."));
+  c.on('error',e=>st("Call error: "+e.type));
+}
+$('host').onclick=async()=>{
+  const id=getCode();if(!id)return;
+  if(!await getMedia())return;
+  st("Server se connect ho raha hai...");
+  peer=new Peer(id);
+  peer.on('open',()=>st("⏳ Wait kar raha hu... ab dusre phone se 2️⃣ dabao (same code)."));
+  peer.on('call',c=>{c.answer(stream);attach(c)});
+  peer.on('error',e=>{
+    if(e.type==='unavailable-id')st("Ye code abhi kisi aur ne use kar rakha hai. Naya code try karo.");
+    else st("Error: "+e.type);
+  });
+};
+$('guest').onclick=async()=>{
+  const id=getCode();if(!id)return;
+  if(!await getMedia())return;
+  st("Call laga raha hu...");
+  peer=new Peer();
+  peer.on('open',()=>{attach(peer.call(id,stream))});
+  peer.on('error',e=>{
+    if(e.type==='peer-unavailable')st("Dusra phone ready nahi hai. Pehle usme 1️⃣ dabao, phir yahan try karo.");
+    else st("Error: "+e.type);
+  });
+};
+$('mute').onclick=()=>{const t=stream.getAudioTracks()[0];t.enabled=!t.enabled;$('mute').textContent=t.enabled?'Mute':'Unmute'};
+$('cam').onclick=()=>{const t=stream.getVideoTracks()[0];t.enabled=!t.enabled;$('cam').textContent=t.enabled?'Camera off':'Camera on'};
+function finish(msg){
+  if(call){try{call.close()}catch(e){}call=null}
+  if(peer){peer.destroy();peer=null}
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+  $('remote').srcObject=null;$('vids').style.display='none';$('ctl').style.display='none';$('setup').style.display='flex';
+  st(msg||"");
+}
+$('end').onclick=()=>finish("Call khatam.");
+</script>
+</body>
+</html>
